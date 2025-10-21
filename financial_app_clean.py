@@ -432,22 +432,47 @@ def smart_agent(user_message):
     """
     message_lower = user_message.lower()
 
+    # Company name to ticker mapping
+    COMPANY_TO_TICKER = {
+        'apple': 'AAPL', 'microsoft': 'MSFT', 'google': 'GOOGL', 'alphabet': 'GOOGL',
+        'meta': 'META', 'facebook': 'META', 'amazon': 'AMZN', 'tesla': 'TSLA',
+        'nvidia': 'NVDA', 'amd': 'AMD', 'intel': 'INTC', 'netflix': 'NFLX',
+        'disney': 'DIS', 'nike': 'NKE', 'walmart': 'WMT', 'target': 'TGT',
+        'jpmorgan': 'JPM', 'chase': 'JPM', 'goldman': 'GS', 'morgan': 'MS',
+        'visa': 'V', 'mastercard': 'MA', 'paypal': 'PYPL', 'square': 'SQ',
+        'boeing': 'BA', 'airbus': 'AIR', 'lockheed': 'LMT', 'raytheon': 'RTX',
+        'pfizer': 'PFE', 'moderna': 'MRNA', 'johnson': 'JNJ', 'abbvie': 'ABBV',
+        'exxon': 'XOM', 'chevron': 'CVX', 'shell': 'SHEL', 'bp': 'BP',
+        'starbucks': 'SBUX', 'mcdonalds': 'MCD', 'chipotle': 'CMG',
+        'ford': 'F', 'gm': 'GM', 'general motors': 'GM', 'toyota': 'TM'
+    }
+
     # Extract ticker from message
     words = user_message.upper().split()
     potential_tickers = [w.strip('.,!?') for w in words if 2 <= len(w) <= 5 and w.isalpha()]
 
-    if not potential_tickers:
-        return """I need a company ticker to analyze!
+    # Check if any word is a company name
+    ticker = None
+    for word in user_message.lower().split():
+        word_clean = word.strip('.,!?')
+        if word_clean in COMPANY_TO_TICKER:
+            ticker = COMPANY_TO_TICKER[word_clean]
+            break
+
+    # If no company name found, use extracted ticker
+    if not ticker:
+        if not potential_tickers:
+            return """I need a company ticker or name to analyze!
 
 Try asking:
-- "Analyze AAPL"
+- "Analyze AAPL" or "Analyze Apple"
 - "What are the financial metrics for Tesla?"
-- "Give me a SWOT for NVDA"
+- "Give me a SWOT for NVDA" or "SWOT for Nvidia"
 - "M&A activity for Microsoft"
 
-Available tickers: AAPL, MSFT, GOOGL, TSLA, NVDA, AMZN, META, etc."""
+Available: AAPL, MSFT, GOOGL, TSLA, NVDA, AMZN, META, etc."""
 
-    ticker = potential_tickers[0]
+        ticker = potential_tickers[0]
 
     # AGENTIC DECISION: Choose tool based on keywords
     response = f"🤖 **Agent Decision:** Analyzing {ticker}...\n\n"
@@ -497,10 +522,12 @@ with gr.Blocks(title="Financial Analyst Agent", theme=gr.themes.Soft()) as app:
             The agent will automatically decide which tool to use!
 
             **Try these:**
-            - "Analyze AAPL"
+            - "Analyze Apple" or "Analyze AAPL"
             - "What are the strengths and weaknesses of Tesla?"
             - "Show me M&A activity for Microsoft"
-            - "What are the financial ratios for NVDA?"
+            - "What are the financial ratios for Nvidia?"
+
+            **You can use either company names or ticker symbols!**
             """)
 
             chat_input = gr.Textbox(

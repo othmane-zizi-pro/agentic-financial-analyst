@@ -22,7 +22,7 @@ echo "✓ No yfinance imports found in financial_app_clean.py"
 echo ""
 echo "=== Starting Financial Analyst App ==="
 echo "Using direct Yahoo Finance API (no yfinance dependency)"
-echo "Server will start on 0.0.0.0:8080"
+echo "Server will start on 0.0.0.0:8000"
 echo ""
 
 python financial_app_clean.py

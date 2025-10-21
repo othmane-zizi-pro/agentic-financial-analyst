@@ -593,10 +593,10 @@ if __name__ == "__main__":
     try:
         print("Starting Financial Analyst Agent (CLEAN VERSION)...")
         print("Using direct Yahoo Finance API - NO yfinance dependency")
-        print("Server: 0.0.0.0:8080")
+        print("Server: 0.0.0.0:8000")
         app.launch(
             server_name="0.0.0.0",
-            server_port=8080,
+            server_port=8000,
             share=False,
             show_error=True,
             quiet=False

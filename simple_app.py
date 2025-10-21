@@ -296,72 +296,164 @@ def update_companies(sector):
     return gr.update(choices=[], value=None)
 
 
+def smart_agent(user_message):
+    """
+    AGENTIC ROUTING: Analyzes user message and calls appropriate tool
+    This is the 'agentic' part - it decides which tool to use!
+    """
+    message_lower = user_message.lower()
+
+    # Extract ticker from message
+    words = user_message.upper().split()
+    potential_tickers = [w.strip('.,!?') for w in words if 2 <= len(w) <= 5 and w.isalpha()]
+
+    if not potential_tickers:
+        return """I need a company ticker to analyze!
+
+Try asking:
+- "Analyze AAPL"
+- "What are the financial metrics for Tesla?"
+- "Give me a SWOT for NVDA"
+- "M&A activity for Microsoft"
+
+Available tickers: AAPL, MSFT, GOOGL, TSLA, NVDA, AMZN, META, etc."""
+
+    ticker = potential_tickers[0]
+
+    # AGENTIC DECISION: Choose tool based on keywords in user message
+    response = f"🤖 **Agent Decision:** Analyzing {ticker}...\n\n"
+
+    # Check for SWOT keywords
+    if any(word in message_lower for word in ['swot', 'strengths', 'weaknesses', 'opportunities', 'threats', 'strategic']):
+        response += f"**Tool Selected:** SWOT Analysis (detected strategic analysis request)\n\n"
+        response += "=" * 70 + "\n"
+        response += swot_tool(ticker=ticker)
+
+    # Check for M&A keywords
+    elif any(word in message_lower for word in ['m&a', 'merger', 'acquisition', 'deal', 'buyout', 'acquire']):
+        response += f"**Tool Selected:** M&A Analyzer (detected M&A activity request)\n\n"
+        response += "=" * 70 + "\n"
+        response += ma_tool(ticker=ticker)
+
+    # Check for ratios/detailed metrics
+    elif any(word in message_lower for word in ['ratio', 'ratios', 'valuation', 'profitability', 'leverage']):
+        response += f"**Tool Selected:** Financial Ratios (detected detailed metrics request)\n\n"
+        response += "=" * 70 + "\n"
+        response += financial_tool(ticker=ticker, metrics_type="ratios")
+
+    # Default to financial metrics
+    else:
+        response += f"**Tool Selected:** Financial Metrics (general analysis)\n\n"
+        response += "=" * 70 + "\n"
+        response += financial_tool(ticker=ticker, metrics_type="summary")
+
+    return response
+
+
 # Create Gradio interface
 with gr.Blocks(title="Financial Analyst Agent", theme=gr.themes.Soft()) as app:
 
     gr.Markdown("""
-    # 📊 Financial Analyst Agent
+    # 📊 Financial Analyst Agent with Smart Routing 🤖
     ### Powered by Databricks
 
     Get real-time financial analysis for any publicly traded company.
+    **NEW: Agentic chat that automatically selects the right tool!**
     """)
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### Select or Enter Company")
+    with gr.Tabs():
+        # Tab 1: Smart Agent Chat (AGENTIC!)
+        with gr.Tab("🤖 Smart Agent Chat"):
+            gr.Markdown("""
+            ### Ask Questions in Natural Language
+            The agent will **automatically decide** which tool to use based on your question!
 
-            sector_dropdown = gr.Dropdown(
-                choices=list(POPULAR_TICKERS.keys()),
-                label="Sector (Optional)",
-                value=None
+            **Try these:**
+            - "Analyze AAPL"
+            - "What are the strengths and weaknesses of Tesla?" (→ SWOT)
+            - "Show me M&A activity for Microsoft" (→ M&A Tool)
+            - "What are the financial ratios for NVDA?" (→ Financial Ratios)
+            """)
+
+            chat_input = gr.Textbox(
+                label="Your Question",
+                placeholder="e.g., 'Analyze Tesla' or 'SWOT for NVDA'",
+                lines=2
             )
 
-            company_dropdown = gr.Dropdown(
-                choices=[],
-                label="Popular Companies",
-                value=None
-            )
+            chat_button = gr.Button("🚀 Ask Agent", variant="primary", size="lg")
 
-            ticker_input = gr.Textbox(
-                label="Or Enter Ticker Symbol",
-                placeholder="e.g., AAPL, MSFT, GOOGL",
-                max_lines=1
-            )
-
-            analysis_type = gr.Radio(
-                choices=["Financial Metrics", "M&A Analysis", "SWOT Analysis"],
-                label="Analysis Type",
-                value="Financial Metrics"
-            )
-
-            analyze_btn = gr.Button("🚀 Analyze", variant="primary", size="lg")
-
-        with gr.Column(scale=2):
-            output = gr.Textbox(
-                label="Analysis Results",
+            chat_output = gr.Textbox(
+                label="Agent Response (with tool selection)",
                 lines=25,
                 max_lines=30,
                 show_copy_button=True
             )
 
-    # Event handlers
-    sector_dropdown.change(
-        fn=update_companies,
-        inputs=[sector_dropdown],
-        outputs=[company_dropdown]
-    )
+            chat_button.click(
+                fn=smart_agent,
+                inputs=[chat_input],
+                outputs=[chat_output]
+            )
 
-    company_dropdown.change(
-        fn=lambda x: x if x else "",
-        inputs=[company_dropdown],
-        outputs=[ticker_input]
-    )
+        # Tab 2: Manual Selection
+        with gr.Tab("📊 Manual Selection"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    gr.Markdown("### Select or Enter Company")
 
-    analyze_btn.click(
-        fn=analyze_company,
-        inputs=[ticker_input, analysis_type],
-        outputs=[output]
-    )
+                    sector_dropdown = gr.Dropdown(
+                        choices=list(POPULAR_TICKERS.keys()),
+                        label="Sector (Optional)",
+                        value=None
+                    )
+
+                    company_dropdown = gr.Dropdown(
+                        choices=[],
+                        label="Popular Companies",
+                        value=None
+                    )
+
+                    ticker_input = gr.Textbox(
+                        label="Or Enter Ticker Symbol",
+                        placeholder="e.g., AAPL, MSFT, GOOGL",
+                        max_lines=1
+                    )
+
+                    analysis_type = gr.Radio(
+                        choices=["Financial Metrics", "M&A Analysis", "SWOT Analysis"],
+                        label="Analysis Type",
+                        value="Financial Metrics"
+                    )
+
+                    analyze_btn = gr.Button("🚀 Analyze", variant="primary", size="lg")
+
+                with gr.Column(scale=2):
+                    output = gr.Textbox(
+                        label="Analysis Results",
+                        lines=25,
+                        max_lines=30,
+                        show_copy_button=True
+                    )
+
+            # Event handlers
+            sector_dropdown.change(
+                fn=update_companies,
+                inputs=[sector_dropdown],
+                outputs=[company_dropdown]
+            )
+
+            company_dropdown.change(
+                fn=lambda x: x if x else "",
+                inputs=[company_dropdown],
+                outputs=[ticker_input]
+            )
+
+            analyze_btn.click(
+                fn=analyze_company,
+                inputs=[ticker_input, analysis_type],
+                outputs=[output]
+            )
 
     gr.Markdown("""
     ---

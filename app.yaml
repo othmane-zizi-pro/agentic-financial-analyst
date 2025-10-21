@@ -1,70 +1,10 @@
-# Databricks App Configuration for Financial Analyst Agent
+# Simple Databricks App Configuration
+# Financial Analyst Agent with Smart Routing
 
-name: financial-analyst-agent
+command: ["python", "simple_app.py"]
 
-description: |
-  AI-powered financial analyst agent that provides comprehensive company analysis
-  including financial metrics, M&A activity, and SWOT analysis.
-
-# Command to run the application
-command:
-  - python
-  - financial_agent/ui/app.py
-
-# Resource configuration
-resources:
-  compute:
-    # Options: XSMALL, SMALL, MEDIUM, LARGE
-    # SMALL recommended for cost optimization (~$2-4/day)
-    size: SMALL
-
-  # Auto-suspend when idle to save credits
-  auto_suspend:
-    enabled: true
-    idle_timeout_minutes: 30
-
-# Environment variables
 env:
-  # Databricks workspace URL
-  - name: DATABRICKS_HOST
-    valueFrom:
-      workspace: host
-
-  # Authentication token (store in secrets for security)
-  - name: DATABRICKS_TOKEN
-    valueFrom:
-      secret:
-        scope: default
-        key: databricks_token
-
-  # Optional: Add API keys for enhanced data sources
-  # - name: ALPHA_VANTAGE_API_KEY
-  #   valueFrom:
-  #     secret:
-  #       scope: default
-  #       key: alpha_vantage_key
-
-# Dependencies (installed during deployment)
-requirements:
-  - mlflow>=2.10.0
-  - langchain>=0.1.0
-  - langchain-community>=0.0.20
-  - databricks-sdk>=0.18.0
-  - yfinance>=0.2.36
-  - pandas>=2.0.0
-  - gradio>=4.19.0
-  - beautifulsoup4>=4.12.0
-  - pydantic>=2.0.0
-
-# Health check endpoint (optional)
-# health_check:
-#   path: /health
-#   interval_seconds: 30
-
-# Permissions (optional - configure who can access the app)
-# permissions:
-#   service_principal_name: "financial-analyst-sp"
-#   can_manage:
-#     - user_name: "your-email@company.com"
-#   can_use:
-#     - group_name: "finance-team"
+  - name: GRADIO_SERVER_NAME
+    value: "0.0.0.0"
+  - name: GRADIO_SERVER_PORT
+    value: "8080"

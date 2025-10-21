@@ -1,14 +1,68 @@
 """
 Simple Databricks App for Financial Analyst
-Uses standalone tools with no complex dependencies
+Uses requests instead of yfinance to avoid dependency issues
 """
 import gradio as gr
-import yfinance as yf
+import requests
 from typing import Dict, Any
 from datetime import datetime
+import json
 
 # ============================================================================
-# STANDALONE TOOLS (Copied inline to avoid import issues)
+# YAHOO FINANCE API WRAPPER (NO YFINANCE DEPENDENCY)
+# ============================================================================
+
+def get_stock_data(ticker: str) -> Dict:
+    """Fetch stock data directly from Yahoo Finance API"""
+    try:
+        ticker = ticker.upper()
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        # Get quote data
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}"
+        params = {
+            'modules': 'price,summaryDetail,financialData,defaultKeyStatistics,assetProfile'
+        }
+
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        result = data.get('quoteSummary', {}).get('result', [])
+        if not result:
+            return {}
+
+        return result[0]
+    except Exception as e:
+        print(f"Error fetching data for {ticker}: {e}")
+        return {}
+
+
+def get_stock_news(ticker: str) -> list:
+    """Fetch stock news from Yahoo Finance"""
+    try:
+        ticker = ticker.upper()
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        url = f"https://query2.finance.yahoo.com/v1/finance/search"
+        params = {'q': ticker, 'quotesCount': 1, 'newsCount': 10}
+
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        return data.get('news', [])
+    except Exception as e:
+        print(f"Error fetching news for {ticker}: {e}")
+        return []
+
+
+# ============================================================================
+# STANDALONE TOOLS
 # ============================================================================
 
 class FinancialMetricsTool:
@@ -16,96 +70,135 @@ class FinancialMetricsTool:
 
     def __call__(self, ticker: str, metrics_type: str = "summary") -> str:
         try:
-            ticker_obj = yf.Ticker(ticker.upper())
-            info = ticker_obj.info
+            data = get_stock_data(ticker.upper())
+            if not data:
+                return f"Error: Could not fetch data for {ticker}. Please verify the ticker symbol."
 
             if metrics_type == "summary":
-                return self._get_summary(info, ticker.upper())
+                return self._get_summary(data, ticker.upper())
             elif metrics_type == "ratios":
-                return self._get_ratios(info, ticker.upper())
+                return self._get_ratios(data, ticker.upper())
             else:
-                return self._get_summary(info, ticker.upper())
+                return self._get_summary(data, ticker.upper())
 
         except Exception as e:
             return f"Error fetching data for {ticker}: {str(e)}"
 
-    def _get_summary(self, info: Dict, ticker: str) -> str:
+    def _get_value(self, data: Dict, *keys, default='N/A'):
+        """Safely extract nested values"""
+        for key in keys:
+            if isinstance(data, dict):
+                data = data.get(key, {})
+            else:
+                return default
+
+        if isinstance(data, dict):
+            return data.get('raw', data.get('fmt', default))
+        return data if data is not None else default
+
+    def _get_summary(self, data: Dict, ticker: str) -> str:
         output = f"Financial Metrics for {ticker}\n"
         output += "=" * 70 + "\n\n"
 
-        output += f"Company: {info.get('longName', 'N/A')}\n"
-        output += f"Sector: {info.get('sector', 'N/A')}\n"
-        output += f"Industry: {info.get('industry', 'N/A')}\n\n"
+        # Company info
+        profile = data.get('assetProfile', {})
+        price = data.get('price', {})
+        summary = data.get('summaryDetail', {})
+        financial = data.get('financialData', {})
+        stats = data.get('defaultKeyStatistics', {})
+
+        output += f"Company: {self._get_value(price, 'longName')}\n"
+        output += f"Sector: {self._get_value(profile, 'sector')}\n"
+        output += f"Industry: {self._get_value(profile, 'industry')}\n\n"
 
         # Market data
-        market_cap = info.get('marketCap', 0)
-        if market_cap > 1_000_000_000:
+        market_cap = self._get_value(price, 'marketCap', default=0)
+        if isinstance(market_cap, (int, float)) and market_cap > 1_000_000_000:
             market_cap_str = f"${market_cap / 1_000_000_000:.2f}B"
-        else:
+        elif isinstance(market_cap, (int, float)) and market_cap > 0:
             market_cap_str = f"${market_cap / 1_000_000:.2f}M"
+        else:
+            market_cap_str = "N/A"
 
         output += f"Market Cap: {market_cap_str}\n"
-        output += f"Current Price: ${info.get('currentPrice', 'N/A')}\n"
-        output += f"52 Week High: ${info.get('fiftyTwoWeekHigh', 'N/A')}\n"
-        output += f"52 Week Low: ${info.get('fiftyTwoWeekLow', 'N/A')}\n\n"
+        output += f"Current Price: ${self._get_value(price, 'regularMarketPrice')}\n"
+        output += f"52 Week High: ${self._get_value(summary, 'fiftyTwoWeekHigh')}\n"
+        output += f"52 Week Low: ${self._get_value(summary, 'fiftyTwoWeekLow')}\n\n"
 
         # Valuation
         output += "Valuation Metrics:\n"
-        output += f"  P/E Ratio: {info.get('trailingPE', 'N/A')}\n"
-        output += f"  Forward P/E: {info.get('forwardPE', 'N/A')}\n"
-        output += f"  Price to Book: {info.get('priceToBook', 'N/A')}\n"
-        output += f"  PEG Ratio: {info.get('pegRatio', 'N/A')}\n\n"
+        output += f"  P/E Ratio: {self._get_value(summary, 'trailingPE')}\n"
+        output += f"  Forward P/E: {self._get_value(summary, 'forwardPE')}\n"
+        output += f"  Price to Book: {self._get_value(stats, 'priceToBook')}\n"
+        output += f"  PEG Ratio: {self._get_value(stats, 'pegRatio')}\n\n"
 
         # Profitability
         output += "Profitability:\n"
-        profit_margin = info.get('profitMargins', 0)
-        operating_margin = info.get('operatingMargins', 0)
-        output += f"  Profit Margin: {profit_margin * 100:.2f}%\n" if profit_margin else "  Profit Margin: N/A\n"
-        output += f"  Operating Margin: {operating_margin * 100:.2f}%\n" if operating_margin else "  Operating Margin: N/A\n"
-        output += f"  ROE: {info.get('returnOnEquity', 'N/A')}\n"
-        output += f"  ROA: {info.get('returnOnAssets', 'N/A')}\n\n"
+        profit_margin = self._get_value(financial, 'profitMargins', default=0)
+        operating_margin = self._get_value(financial, 'operatingMargins', default=0)
+
+        if isinstance(profit_margin, (int, float)) and profit_margin > 0:
+            output += f"  Profit Margin: {profit_margin * 100:.2f}%\n"
+        else:
+            output += "  Profit Margin: N/A\n"
+
+        if isinstance(operating_margin, (int, float)) and operating_margin > 0:
+            output += f"  Operating Margin: {operating_margin * 100:.2f}%\n"
+        else:
+            output += "  Operating Margin: N/A\n"
+
+        output += f"  ROE: {self._get_value(financial, 'returnOnEquity')}\n"
+        output += f"  ROA: {self._get_value(financial, 'returnOnAssets')}\n\n"
 
         # Growth
-        revenue_growth = info.get('revenueGrowth', 0)
+        revenue_growth = self._get_value(financial, 'revenueGrowth', default=0)
         output += "Growth:\n"
-        output += f"  Revenue Growth: {revenue_growth * 100:.2f}%\n" if revenue_growth else "  Revenue Growth: N/A\n"
-        output += f"  Earnings Growth: {info.get('earningsGrowth', 'N/A')}\n\n"
+        if isinstance(revenue_growth, (int, float)) and revenue_growth != 0:
+            output += f"  Revenue Growth: {revenue_growth * 100:.2f}%\n"
+        else:
+            output += "  Revenue Growth: N/A\n"
+        output += f"  Earnings Growth: {self._get_value(financial, 'earningsGrowth')}\n\n"
 
         # Financial Health
         output += "Financial Health:\n"
-        output += f"  Current Ratio: {info.get('currentRatio', 'N/A')}\n"
-        output += f"  Debt to Equity: {info.get('debtToEquity', 'N/A')}\n"
-        output += f"  Quick Ratio: {info.get('quickRatio', 'N/A')}\n\n"
+        output += f"  Current Ratio: {self._get_value(financial, 'currentRatio')}\n"
+        output += f"  Debt to Equity: {self._get_value(financial, 'debtToEquity')}\n"
+        output += f"  Quick Ratio: {self._get_value(financial, 'quickRatio')}\n\n"
 
         # Analyst Opinion
-        output += f"Analyst Recommendation: {info.get('recommendationKey', 'N/A').upper()}\n"
+        rec = self._get_value(financial, 'recommendationKey', default='N/A')
+        output += f"Analyst Recommendation: {rec.upper() if isinstance(rec, str) else rec}\n"
 
         return output
 
-    def _get_ratios(self, info: Dict, ticker: str) -> str:
+    def _get_ratios(self, data: Dict, ticker: str) -> str:
         output = f"Financial Ratios for {ticker}\n"
         output += "=" * 70 + "\n\n"
 
+        financial = data.get('financialData', {})
+        summary = data.get('summaryDetail', {})
+        stats = data.get('defaultKeyStatistics', {})
+
         output += "Profitability Ratios:\n"
-        output += f"  Gross Margin: {info.get('grossMargins', 'N/A')}\n"
-        output += f"  Operating Margin: {info.get('operatingMargins', 'N/A')}\n"
-        output += f"  Profit Margin: {info.get('profitMargins', 'N/A')}\n"
-        output += f"  ROE: {info.get('returnOnEquity', 'N/A')}\n"
-        output += f"  ROA: {info.get('returnOnAssets', 'N/A')}\n\n"
+        output += f"  Gross Margin: {self._get_value(financial, 'grossMargins')}\n"
+        output += f"  Operating Margin: {self._get_value(financial, 'operatingMargins')}\n"
+        output += f"  Profit Margin: {self._get_value(financial, 'profitMargins')}\n"
+        output += f"  ROE: {self._get_value(financial, 'returnOnEquity')}\n"
+        output += f"  ROA: {self._get_value(financial, 'returnOnAssets')}\n\n"
 
         output += "Valuation Ratios:\n"
-        output += f"  P/E Ratio: {info.get('trailingPE', 'N/A')}\n"
-        output += f"  Forward P/E: {info.get('forwardPE', 'N/A')}\n"
-        output += f"  PEG Ratio: {info.get('pegRatio', 'N/A')}\n"
-        output += f"  Price to Book: {info.get('priceToBook', 'N/A')}\n"
-        output += f"  Price to Sales: {info.get('priceToSalesTrailing12Months', 'N/A')}\n\n"
+        output += f"  P/E Ratio: {self._get_value(summary, 'trailingPE')}\n"
+        output += f"  Forward P/E: {self._get_value(summary, 'forwardPE')}\n"
+        output += f"  PEG Ratio: {self._get_value(stats, 'pegRatio')}\n"
+        output += f"  Price to Book: {self._get_value(stats, 'priceToBook')}\n"
+        output += f"  Price to Sales: {self._get_value(summary, 'priceToSalesTrailing12Months')}\n\n"
 
         output += "Liquidity Ratios:\n"
-        output += f"  Current Ratio: {info.get('currentRatio', 'N/A')}\n"
-        output += f"  Quick Ratio: {info.get('quickRatio', 'N/A')}\n\n"
+        output += f"  Current Ratio: {self._get_value(financial, 'currentRatio')}\n"
+        output += f"  Quick Ratio: {self._get_value(financial, 'quickRatio')}\n\n"
 
         output += "Leverage Ratios:\n"
-        output += f"  Debt to Equity: {info.get('debtToEquity', 'N/A')}\n"
+        output += f"  Debt to Equity: {self._get_value(financial, 'debtToEquity')}\n"
 
         return output
 
@@ -115,18 +208,21 @@ class MATool:
 
     def __call__(self, ticker: str) -> str:
         try:
-            ticker_obj = yf.Ticker(ticker.upper())
-            info = ticker_obj.info
+            data = get_stock_data(ticker.upper())
+            news = get_stock_news(ticker.upper())
+
+            if not data:
+                return f"Error: Could not fetch data for {ticker}. Please verify the ticker symbol."
 
             output = f"M&A Activity Analysis for {ticker.upper()}\n"
             output += "=" * 70 + "\n\n"
 
-            output += f"Company: {info.get('longName', 'N/A')}\n"
-            output += f"Sector: {info.get('sector', 'N/A')}\n"
-            output += f"Industry: {info.get('industry', 'N/A')}\n\n"
+            price = data.get('price', {})
+            profile = data.get('assetProfile', {})
 
-            # Get news
-            news = ticker_obj.news if hasattr(ticker_obj, 'news') else []
+            output += f"Company: {self._get_value(price, 'longName')}\n"
+            output += f"Sector: {self._get_value(profile, 'sector')}\n"
+            output += f"Industry: {self._get_value(profile, 'industry')}\n\n"
 
             # Filter for M&A related news
             ma_keywords = ['merger', 'acquisition', 'acquire', 'bought', 'purchase',
@@ -157,21 +253,35 @@ class MATool:
         except Exception as e:
             return f"Error analyzing M&A for {ticker}: {str(e)}"
 
+    def _get_value(self, data: Dict, key: str, default='N/A'):
+        """Safely extract values"""
+        val = data.get(key, default)
+        if isinstance(val, dict):
+            return val.get('raw', val.get('fmt', default))
+        return val if val is not None else default
+
 
 class SWOTTool:
     """Standalone SWOT analysis tool"""
 
     def __call__(self, ticker: str) -> str:
         try:
-            ticker_obj = yf.Ticker(ticker.upper())
-            info = ticker_obj.info
+            data = get_stock_data(ticker.upper())
+
+            if not data:
+                return f"Error: Could not fetch data for {ticker}. Please verify the ticker symbol."
 
             output = f"SWOT Analysis for {ticker.upper()}\n"
             output += "=" * 70 + "\n\n"
 
-            output += f"Company: {info.get('longName', 'N/A')}\n"
-            output += f"Sector: {info.get('sector', 'N/A')}\n"
-            output += f"Industry: {info.get('industry', 'N/A')}\n\n"
+            price = data.get('price', {})
+            profile = data.get('assetProfile', {})
+            financial = data.get('financialData', {})
+            summary = data.get('summaryDetail', {})
+
+            output += f"Company: {self._get_value(price, 'longName')}\n"
+            output += f"Sector: {self._get_value(profile, 'sector')}\n"
+            output += f"Industry: {self._get_value(profile, 'industry')}\n\n"
 
             output += "=" * 70 + "\n\n"
 
@@ -180,14 +290,19 @@ class SWOTTool:
             output += "-" * 70 + "\n"
 
             strengths = []
-            if info.get('profitMargins', 0) > 0.15:
-                strengths.append(f"Strong profit margin of {info.get('profitMargins', 0) * 100:.1f}%")
-            if info.get('returnOnEquity', 0) > 0.15:
-                strengths.append(f"Excellent ROE of {info.get('returnOnEquity', 0) * 100:.1f}%")
-            if info.get('currentRatio', 0) > 1.5:
-                strengths.append(f"Healthy liquidity with current ratio of {info.get('currentRatio', 0):.2f}")
-            if info.get('revenueGrowth', 0) > 0.1:
-                strengths.append(f"Strong revenue growth of {info.get('revenueGrowth', 0) * 100:.1f}%")
+            profit_margin = self._get_value(financial, 'profitMargins', default=0)
+            roe = self._get_value(financial, 'returnOnEquity', default=0)
+            current_ratio = self._get_value(financial, 'currentRatio', default=0)
+            revenue_growth = self._get_value(financial, 'revenueGrowth', default=0)
+
+            if isinstance(profit_margin, (int, float)) and profit_margin > 0.15:
+                strengths.append(f"Strong profit margin of {profit_margin * 100:.1f}%")
+            if isinstance(roe, (int, float)) and roe > 0.15:
+                strengths.append(f"Excellent ROE of {roe * 100:.1f}%")
+            if isinstance(current_ratio, (int, float)) and current_ratio > 1.5:
+                strengths.append(f"Healthy liquidity with current ratio of {current_ratio:.2f}")
+            if isinstance(revenue_growth, (int, float)) and revenue_growth > 0.1:
+                strengths.append(f"Strong revenue growth of {revenue_growth * 100:.1f}%")
 
             if not strengths:
                 strengths.append("Established market presence")
@@ -200,12 +315,15 @@ class SWOTTool:
             output += "-" * 70 + "\n"
 
             weaknesses = []
-            if info.get('debtToEquity', 0) > 2.0:
-                weaknesses.append(f"High debt-to-equity ratio of {info.get('debtToEquity', 0):.2f}")
-            if info.get('currentRatio', 0) < 1.0 and info.get('currentRatio', 0) > 0:
-                weaknesses.append(f"Low liquidity with current ratio of {info.get('currentRatio', 0):.2f}")
-            if info.get('trailingPE', 0) > 30:
-                weaknesses.append(f"High P/E ratio of {info.get('trailingPE', 0):.2f} may indicate overvaluation")
+            debt_equity = self._get_value(financial, 'debtToEquity', default=0)
+            pe_ratio = self._get_value(summary, 'trailingPE', default=0)
+
+            if isinstance(debt_equity, (int, float)) and debt_equity > 2.0:
+                weaknesses.append(f"High debt-to-equity ratio of {debt_equity:.2f}")
+            if isinstance(current_ratio, (int, float)) and 0 < current_ratio < 1.0:
+                weaknesses.append(f"Low liquidity with current ratio of {current_ratio:.2f}")
+            if isinstance(pe_ratio, (int, float)) and pe_ratio > 30:
+                weaknesses.append(f"High P/E ratio of {pe_ratio:.2f} may indicate overvaluation")
 
             if not weaknesses:
                 weaknesses.append("Limited public data available")
@@ -218,12 +336,15 @@ class SWOTTool:
             output += "-" * 70 + "\n"
 
             opportunities = []
-            if info.get('revenueGrowth', 0) > 0:
+            if isinstance(revenue_growth, (int, float)) and revenue_growth > 0:
                 opportunities.append("Continue expanding in growing markets")
-            if info.get('pegRatio', 0) < 1.0 and info.get('pegRatio', 0) > 0:
+
+            peg_ratio = self._get_value(financial, 'pegRatio', default=0)
+            if isinstance(peg_ratio, (int, float)) and 0 < peg_ratio < 1.0:
                 opportunities.append("Potential undervaluation based on growth")
 
-            opportunities.append(f"Leverage position in {info.get('industry', 'the industry')}")
+            industry = self._get_value(profile, 'industry', default='the industry')
+            opportunities.append(f"Leverage position in {industry}")
 
             for i, o in enumerate(opportunities, 1):
                 output += f"{i}. {o}\n"
@@ -233,12 +354,14 @@ class SWOTTool:
             output += "-" * 70 + "\n"
 
             threats = []
-            if info.get('beta', 0) > 1.5:
-                threats.append(f"High market volatility (beta: {info.get('beta', 0):.2f})")
-            if info.get('debtToEquity', 0) > 1.5:
+            beta = self._get_value(summary, 'beta', default=0)
+
+            if isinstance(beta, (int, float)) and beta > 1.5:
+                threats.append(f"High market volatility (beta: {beta:.2f})")
+            if isinstance(debt_equity, (int, float)) and debt_equity > 1.5:
                 threats.append("Elevated debt levels")
 
-            threats.append(f"Competition in {info.get('industry', 'the industry')}")
+            threats.append(f"Competition in {industry}")
             threats.append("Market volatility")
 
             for i, t in enumerate(threats, 1):
@@ -250,6 +373,13 @@ class SWOTTool:
 
         except Exception as e:
             return f"Error generating SWOT for {ticker}: {str(e)}"
+
+    def _get_value(self, data: Dict, key: str, default='N/A'):
+        """Safely extract values"""
+        val = data.get(key, default)
+        if isinstance(val, dict):
+            return val.get('raw', val.get('fmt', default))
+        return val if val is not None else default
 
 
 # ============================================================================
@@ -457,13 +587,14 @@ with gr.Blocks(title="Financial Analyst Agent", theme=gr.themes.Soft()) as app:
 
     gr.Markdown("""
     ---
-    **Data Source:** Yahoo Finance | **Built for:** Databricks Hackathon
+    **Data Source:** Yahoo Finance API | **Built for:** Databricks Hackathon
     """)
 
 # Launch app
 if __name__ == "__main__":
     try:
         print("Starting Financial Analyst Agent...")
+        print("Using direct Yahoo Finance API (no yfinance dependency)")
         print("Server: 0.0.0.0:8080")
         app.launch(
             server_name="0.0.0.0",

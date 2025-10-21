@@ -1,0 +1,13 @@
+# FINAL Databricks App Configuration
+# Guaranteed fresh deployment with no caching issues
+
+command:
+  - "sh"
+  - "-c"
+  - "chmod +x start_app.sh && ./start_app.sh"
+
+env:
+  - name: GRADIO_SERVER_NAME
+    value: "0.0.0.0"
+  - name: GRADIO_SERVER_PORT
+    value: "8080"

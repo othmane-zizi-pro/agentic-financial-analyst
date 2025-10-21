@@ -1,7 +1,10 @@
 # Simple Databricks App Configuration
 # Financial Analyst Agent with Smart Routing
 
-command: ["python", "simple_app.py"]
+command:
+  - "sh"
+  - "-c"
+  - "pip install -q yfinance pandas gradio requests && python simple_app.py"
 
 env:
   - name: GRADIO_SERVER_NAME

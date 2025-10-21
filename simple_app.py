@@ -462,4 +462,18 @@ with gr.Blocks(title="Financial Analyst Agent", theme=gr.themes.Soft()) as app:
 
 # Launch app
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=8080)
+    try:
+        print("Starting Financial Analyst Agent...")
+        print("Server: 0.0.0.0:8080")
+        app.launch(
+            server_name="0.0.0.0",
+            server_port=8080,
+            share=False,
+            show_error=True,
+            quiet=False
+        )
+    except Exception as e:
+        print(f"Error launching app: {e}")
+        import traceback
+        traceback.print_exc()
+        raise

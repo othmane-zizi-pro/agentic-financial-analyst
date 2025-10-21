@@ -1,12 +1,14 @@
 """
 Financial Analyst App - Clean Version
 NO yfinance dependency - uses direct Yahoo Finance API
+Enhanced with LLM analysis (with fallback to rules-based)
 """
 import gradio as gr
 import requests
 from typing import Dict, Any
 from datetime import datetime
 import json
+import os
 
 # ============================================================================
 # HARDCODED FALLBACK DATA (for when API fails)
@@ -72,6 +74,100 @@ FALLBACK_NEWS = {
         {'title': 'NVIDIA Continues to Dominate AI Chip Market', 'publisher': 'Forbes', 'providerPublishTime': 1729400000, 'link': 'https://example.com/nvda-market'}
     ]
 }
+
+# ============================================================================
+# LLM ENHANCEMENT LAYER (with fallback)
+# ============================================================================
+
+def enhance_with_llm(user_query: str, raw_data: str, analysis_type: str) -> tuple[str, str]:
+    """
+    Enhance analysis with LLM insights
+    Returns: (enhanced_result, model_used)
+    """
+    try:
+        # Try Databricks Foundation Model API
+        host = os.getenv('DATABRICKS_HOST')
+        token = os.getenv('DATABRICKS_CLIENT_SECRET') or os.getenv('DATABRICKS_TOKEN')
+
+        if not host or not token:
+            raise Exception("Databricks credentials not available")
+
+        # Use OpenAI-compatible endpoint for Databricks models
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=token,
+            base_url=f"https://{host}/serving-endpoints"
+        )
+
+        # Try DBRX first, then Llama as fallback
+        models_to_try = [
+            "databricks-dbrx-instruct",
+            "databricks-meta-llama-3-1-70b-instruct",
+            "databricks-meta-llama-3-70b-instruct"
+        ]
+
+        prompt = f"""You are a professional financial analyst.
+
+User Question: {user_query}
+
+Analysis Type: {analysis_type}
+
+Raw Data:
+{raw_data}
+
+Provide a concise, actionable analysis with:
+1. 📊 Key Insights (2-3 most important points)
+2. ⚠️ Risks to Watch
+3. 💡 Recommendation (with brief reasoning)
+
+Keep it under 200 words and actionable."""
+
+        for model in models_to_try:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are a concise financial analyst."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=500,
+                    temperature=0.3
+                )
+
+                llm_analysis = response.choices[0].message.content
+                model_name = model.replace('databricks-', '').upper()
+
+                enhanced = f"""{raw_data}
+
+{'='*70}
+
+🤖 AI-Enhanced Analysis (Model: {model_name})
+{'='*70}
+
+{llm_analysis}
+
+{'='*70}
+💡 Powered by {model_name} on Databricks
+"""
+                return enhanced, model_name
+
+            except Exception as model_error:
+                print(f"Failed to use {model}: {model_error}")
+                continue
+
+        # If all models fail
+        raise Exception("All LLM models failed")
+
+    except Exception as e:
+        print(f"LLM enhancement failed: {e}, using rules-based output")
+        # Fallback: just return raw data
+        return f"""{raw_data}
+
+{'='*70}
+ℹ️  Analysis Mode: Rules-Based (LLM unavailable)
+{'='*70}""", "RULES-BASED"
+
 
 # ============================================================================
 # YAHOO FINANCE API WRAPPER (NO YFINANCE DEPENDENCY)
@@ -564,43 +660,51 @@ Available: AAPL, MSFT, GOOGL, TSLA, NVDA, AMZN, META, etc."""
         ticker = potential_tickers[0]
 
     # AGENTIC DECISION: Choose tool based on keywords
-    response = f"🤖 **Agent Decision:** Analyzing {ticker}...\n\n"
+    header = f"🤖 **Agent Decision:** Analyzing {ticker}...\n\n"
 
-    # Check for SWOT keywords
+    # Determine analysis type and get raw data
     if any(word in message_lower for word in ['swot', 'strengths', 'weaknesses', 'opportunities', 'threats', 'strategic']):
-        response += f"**Tool Selected:** SWOT Analysis\n\n"
-        response += "=" * 70 + "\n"
-        response += swot_tool(ticker=ticker)
+        analysis_type = "SWOT Analysis"
+        header += f"**Tool Selected:** {analysis_type}\n\n"
+        header += "=" * 70 + "\n"
+        raw_data = swot_tool(ticker=ticker)
 
     # Check for M&A keywords
     elif any(word in message_lower for word in ['m&a', 'merger', 'acquisition', 'deal', 'buyout', 'acquire']):
-        response += f"**Tool Selected:** M&A Analyzer\n\n"
-        response += "=" * 70 + "\n"
-        response += ma_tool(ticker=ticker)
+        analysis_type = "M&A Analysis"
+        header += f"**Tool Selected:** {analysis_type}\n\n"
+        header += "=" * 70 + "\n"
+        raw_data = ma_tool(ticker=ticker)
 
     # Check for ratios/detailed metrics
     elif any(word in message_lower for word in ['ratio', 'ratios', 'valuation', 'profitability', 'leverage']):
-        response += f"**Tool Selected:** Financial Ratios\n\n"
-        response += "=" * 70 + "\n"
-        response += financial_tool(ticker=ticker, metrics_type="ratios")
+        analysis_type = "Financial Ratios"
+        header += f"**Tool Selected:** {analysis_type}\n\n"
+        header += "=" * 70 + "\n"
+        raw_data = financial_tool(ticker=ticker, metrics_type="ratios")
 
     # Default to financial metrics
     else:
-        response += f"**Tool Selected:** Financial Metrics\n\n"
-        response += "=" * 70 + "\n"
-        response += financial_tool(ticker=ticker, metrics_type="summary")
+        analysis_type = "Financial Metrics"
+        header += f"**Tool Selected:** {analysis_type}\n\n"
+        header += "=" * 70 + "\n"
+        raw_data = financial_tool(ticker=ticker, metrics_type="summary")
 
-    return response
+    # Enhance with LLM (with fallback to rules-based)
+    enhanced_data, model_used = enhance_with_llm(user_message, raw_data, analysis_type)
+
+    return header + enhanced_data
 
 
 # Create Gradio interface
 with gr.Blocks(title="Financial Analyst Agent", theme=gr.themes.Soft()) as app:
 
     gr.Markdown("""
-    # 📊 Financial Analyst Agent with Smart Routing 🤖
-    ### Powered by Databricks
+    # 📊 Financial Analyst Agent with AI Enhancement 🤖
+    ### Powered by Databricks Foundation Models
 
-    Get real-time financial analysis for any publicly traded company.
+    Get real-time financial analysis enhanced with AI insights.
+    **Features:** Smart routing • LLM-powered analysis • Fallback guarantee
     """)
 
     with gr.Tabs():

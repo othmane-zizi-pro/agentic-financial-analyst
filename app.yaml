@@ -4,7 +4,7 @@
 command:
   - "sh"
   - "-c"
-  - "pip install -q yfinance==0.2.28 pandas gradio requests && python simple_app.py"
+  - "pip cache purge && pip install --no-cache-dir --force-reinstall yfinance==0.2.28 pandas gradio requests && python simple_app.py"
 
 env:
   - name: GRADIO_SERVER_NAME

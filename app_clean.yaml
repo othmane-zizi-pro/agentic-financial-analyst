@@ -1,0 +1,13 @@
+# CLEAN Databricks App Configuration
+# Financial Analyst Agent - NO YFINANCE!
+
+command:
+  - "sh"
+  - "-c"
+  - "pip install -q pandas gradio requests && python financial_app_clean.py"
+
+env:
+  - name: GRADIO_SERVER_NAME
+    value: "0.0.0.0"
+  - name: GRADIO_SERVER_PORT
+    value: "8080"

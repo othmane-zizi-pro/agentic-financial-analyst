@@ -1,0 +1,33 @@
+# Databricks Asset Bundle configuration
+bundle:
+  name: financial-analyst-agent
+
+workspace:
+  host: https://your-workspace.cloud.databricks.com
+
+artifacts:
+  default:
+    path: ./financial_agent
+    type: whl
+
+resources:
+  experiments:
+    financial_agent_experiment:
+      name: /Users/${workspace.current_user.userName}/financial-analyst-agent
+
+  model_serving_endpoints:
+    financial_agent_endpoint:
+      config:
+        served_models:
+          - model_name: financial_agent_model
+            model_version: latest
+            workload_size: Small
+            scale_to_zero_enabled: true
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production

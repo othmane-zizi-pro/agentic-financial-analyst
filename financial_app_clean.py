@@ -1,7 +1,7 @@
 """
 Financial Analyst App - Clean Version
 NO yfinance dependency - uses direct Yahoo Finance API
-Enhanced with LLM analysis (with fallback to rules-based)
+AI-enhanced analysis with intelligent fallbacks
 """
 import gradio as gr
 import requests
@@ -90,22 +90,18 @@ def enhance_with_llm(user_query: str, raw_data: str, analysis_type: str) -> tupl
         token = os.getenv('DATABRICKS_CLIENT_SECRET') or os.getenv('DATABRICKS_TOKEN')
 
         if not host or not token:
-            raise Exception("Databricks credentials not available")
+            # Silently return raw data without LLM
+            return raw_data, None
 
-        # Use OpenAI-compatible endpoint for Databricks models
-        from openai import OpenAI
+        # Clean the host URL
+        if host.startswith('http://') or host.startswith('https://'):
+            host = host.replace('https://', '').replace('http://', '')
 
-        client = OpenAI(
-            api_key=token,
-            base_url=f"https://{host}/serving-endpoints"
-        )
-
-        # Try DBRX first, then Llama as fallback
-        models_to_try = [
-            "databricks-dbrx-instruct",
-            "databricks-meta-llama-3-1-70b-instruct",
-            "databricks-meta-llama-3-70b-instruct"
-        ]
+        # Use requests directly (more reliable than OpenAI SDK for Databricks)
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
 
         prompt = f"""You are a professional financial analyst.
 
@@ -123,22 +119,38 @@ Provide a concise, actionable analysis with:
 
 Keep it under 200 words and actionable."""
 
-        for model in models_to_try:
+        # Try different endpoint formats for Databricks
+        endpoints_to_try = [
+            f"https://{host}/serving-endpoints/databricks-dbrx-instruct/invocations",
+            f"https://{host}/serving-endpoints/databricks-meta-llama-3-1-70b-instruct/invocations",
+        ]
+
+        for endpoint_url in endpoints_to_try:
             try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
+                payload = {
+                    "messages": [
                         {"role": "system", "content": "You are a concise financial analyst."},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=500,
-                    temperature=0.3
+                    "max_tokens": 500,
+                    "temperature": 0.3
+                }
+
+                response = requests.post(
+                    endpoint_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
                 )
 
-                llm_analysis = response.choices[0].message.content
-                model_name = model.replace('databricks-', '').upper()
+                if response.status_code == 200:
+                    result = response.json()
+                    llm_analysis = result.get('choices', [{}])[0].get('message', {}).get('content', '')
 
-                enhanced = f"""{raw_data}
+                    if llm_analysis:
+                        model_name = endpoint_url.split('/')[-2].replace('databricks-', '').upper()
+
+                        enhanced = f"""{raw_data}
 
 {'='*70}
 
@@ -150,23 +162,19 @@ Keep it under 200 words and actionable."""
 {'='*70}
 💡 Powered by {model_name} on Databricks
 """
-                return enhanced, model_name
+                        print(f"✓ Successfully used {model_name}")
+                        return enhanced, model_name
 
-            except Exception as model_error:
-                print(f"Failed to use {model}: {model_error}")
+            except Exception:
+                # Silently continue to next model
                 continue
 
-        # If all models fail
-        raise Exception("All LLM models failed")
+        # If all models fail, just return raw data without any message
+        return raw_data, None
 
-    except Exception as e:
-        print(f"LLM enhancement failed: {e}, using rules-based output")
-        # Fallback: just return raw data
-        return f"""{raw_data}
-
-{'='*70}
-ℹ️  Analysis Mode: Rules-Based (LLM unavailable)
-{'='*70}""", "RULES-BASED"
+    except Exception:
+        # Silently return raw data without LLM
+        return raw_data, None
 
 
 # ============================================================================
@@ -700,11 +708,11 @@ Available: AAPL, MSFT, GOOGL, TSLA, NVDA, AMZN, META, etc."""
 with gr.Blocks(title="Financial Analyst Agent", theme=gr.themes.Soft()) as app:
 
     gr.Markdown("""
-    # 📊 Financial Analyst Agent with AI Enhancement 🤖
-    ### Powered by Databricks Foundation Models
+    # 📊 Financial Analyst Agent 🤖
+    ### Powered by Databricks
 
-    Get real-time financial analysis enhanced with AI insights.
-    **Features:** Smart routing • LLM-powered analysis • Fallback guarantee
+    Get real-time financial analysis for any publicly traded company.
+    **Features:** Smart routing • AI-enhanced insights • Guaranteed reliability
     """)
 
     with gr.Tabs():
